@@ -1,0 +1,13 @@
+We tested two methods to see whether the alerts are being used to learn the joint modality representation.
+To achieve this, we decided to see if the projected representations can predict the overall relevance of the alert.
+The two methods are as follows:
+
+1) Summary based where for each patient the alerts (taking value in {+1,-1}) are summed over the time dimension.
+Next, we obtain the projected representation from all modalities except the outcomes and sum them for each patient.
+Finally, we set up a regression model where there are projected repr dimension number of independent variables and overall relevance (summed across time) as the dependent variable.
+Here, all the patients including those who didn't have an alert during the procedure were also included in the regression fit.
+
+2) In this method, we only consider the patients for which there was an alert. For the ones with multiple alerts we randomly select one of them.
+ We identify the time when the alert went off and obtain the flow and med representation until that time point which is further passed to the projection layers.
+After that the remaining preop modality representations are added to the flow and med representation.
+Finally, we set up a binary prediction model where the projected representation until the time of the alert are treated as the predictors and the alert relevance at that time as the variable to predict.

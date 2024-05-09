@@ -791,6 +791,9 @@ class MVCL_f_m_sep:
                 self.after_epoch_callback(self, cum_loss)
 
         # saving the preops model to be used later
+        torch.save(self.net_f.state_dict(), f'{self.fd}/{self.seed}_model_f.pkl')
+        torch.save(self.net_m_alt.state_dict(), f'{self.fd}/{self.seed}_model_m.pkl')
+        torch.save(self.net_a.state_dict(), f'{self.fd}/{self.seed}_model_a.pkl')
         torch.save(self.model_pr.state_dict(), f'{self.fd}/{self.seed}_model_pr.pkl')
         torch.save(self.model_pr_l.state_dict(), f'{self.fd}/{self.seed}_model_pr_labs.pkl')
         torch.save(self.model_cbow.state_dict(), f'{self.fd}/{self.seed}_model_cbow.pkl')
@@ -800,6 +803,9 @@ class MVCL_f_m_sep:
         torch.save(self.model_outcomes.state_dict(), f'{self.fd}/{self.seed}_model_outcome_rep.pkl')
 
         # saving the projection heads to be used later
+        torch.save(self.ts_f_projection_head.state_dict(), f'{self.fd}/{self.seed}_proj_head_flow.pkl')
+        torch.save(self.ts_m_projection_head.state_dict(), f'{self.fd}/{self.seed}_proj_head_meds.pkl')
+        torch.save(self.ts_a_projection_head.state_dict(), f'{self.fd}/{self.seed}_proj_head_alerts.pkl')
         torch.save(self.pr_projection_head.state_dict(), f'{self.fd}/{self.seed}_proj_head_pr.pkl')
         torch.save(self.pr_projection_head_l.state_dict(), f'{self.fd}/{self.seed}_proj_head_pr_labs.pkl')
         torch.save(self.cbow_projection_head.state_dict(), f'{self.fd}/{self.seed}_proj_head_cbow.pkl')
@@ -1140,3 +1146,247 @@ class MVCL_f_m_sep:
         else:
             embeddings = torch.cat(embeddings).cpu().numpy()
             return embeddings
+
+    def associationBTWalertsANDrestmodalities(self, proc_modality_dict_test):
+        modalities_selected = proc_modality_dict_test.keys()
+
+        if 'alerts' in modalities_selected:
+            test_data_a = proc_modality_dict_test['alerts']
+            temporal_missing_a = np.isnan(test_data_a).all(axis=-1).any(axis=0)
+            if temporal_missing_a[0] or temporal_missing_a[-1]:
+                test_data_a = centerize_vary_length_series(test_data_a)
+            test_data_a = test_data_a[~np.isnan(test_data_a).all(axis=2).all(axis=1)]
+            # breakpoint()
+            if True:
+                test_data_a = torch.from_numpy(test_data_a).to(torch.float).to(device=self.device)
+                timepoint_list = {}
+                for i in range(len(test_data_a)):
+                    if torch.nonzero(test_data_a[i]).size()[0]>0:
+                        if torch.nonzero(test_data_a[i,:,1]).shape[0] > 1:
+                            timepoint_list[i] = np.random.choice(torch.nonzero(test_data_a[i,:,1]).squeeze().cpu().detach().numpy(), size=1,replace=False)[0]
+                        else:
+                            timepoint_list[i] = torch.nonzero(test_data_a[i,:,1]).cpu().detach().numpy()[0][0]
+                test_data_a = test_data_a[list(timepoint_list.keys()),list(timepoint_list.values()), :]
+            else:
+                test_data_a = test_data_a.sum(axis=1)  # this is being done to eliminate the time dimension that is not present in the other representations
+
+        proj_list = []
+        if 'flow' in modalities_selected:
+            test_data_f = proc_modality_dict_test['flow']
+            temporal_missing_f = np.isnan(test_data_f).all(axis=-1).any(axis=0)
+            if temporal_missing_f[0] or temporal_missing_f[-1]:
+                test_data_f = centerize_vary_length_series(test_data_f)
+            test_data_f = test_data_f[~np.isnan(test_data_f).all(axis=2).all(axis=1)]
+            test_data_f = torch.from_numpy(test_data_f).to(torch.float).to(device=self.device)
+
+            state_dict = torch.load(f'{self.fd}/{self.seed}_model_f.pkl', map_location=self.device)
+            self.net_f.load_state_dict(state_dict)
+            state_dict_proj_head = torch.load(f'{self.fd}/{self.seed}_proj_head_flow.pkl', map_location=self.device)
+            self.ts_f_projection_head.load_state_dict(state_dict_proj_head)
+            self.ts_f_projection_head.eval()
+
+            if True:
+                out_ts_f = self._eval_with_pooling(test_data_f[list(timepoint_list.keys())[0],:list(timepoint_list.values())[0]+1, :].unsqueeze(0), 'f', encoding_window='full_series')  # +1 because the list contains the exact indexes that start from zero
+                out_ts_f = out_ts_f.squeeze(1).to(device=self.device)
+                proj_rep_f = self.ts_f_projection_head(out_ts_f).cpu().detach()
+
+                for i in range(1, len(timepoint_list)):
+                    out_ts_f = self._eval_with_pooling(
+                        test_data_f[list(timepoint_list.keys())[i], :list(timepoint_list.values())[i]+1, :].unsqueeze(0),
+                        'f', encoding_window='full_series')
+                    out_ts_f = out_ts_f.squeeze(1).to(device=self.device)
+                    proj_rep_f = torch.concat([proj_rep_f, self.ts_f_projection_head(out_ts_f).cpu().detach()], dim=0)
+
+            else:
+                # this alernative uses all the time series data
+                out_ts_f = self._eval_with_pooling(test_data_f[:self.batch_size,:,:], 'f', encoding_window='full_series')
+                out_ts_f = out_ts_f.squeeze(1).to(device=self.device)
+                proj_rep_f = self.ts_f_projection_head(out_ts_f).cpu().detach()
+
+                # this roundabout is being done because all the data is not fitting on the gpu at once.
+                n_batches, remaining_samples = divmod((test_data_f.shape[0]-self.batch_size), self.batch_size)
+                for i in range(1, n_batches+1):
+                    out_ts_f = self._eval_with_pooling(test_data_f[(i*self.batch_size):((i+1)*self.batch_size), :, :], 'f',encoding_window='full_series')
+                    out_ts_f = out_ts_f.squeeze(1).to(device=self.device)
+                    proj_rep_f = torch.concat([proj_rep_f,self.ts_f_projection_head(out_ts_f).cpu().detach()], dim=0)
+
+                if remaining_samples>0:
+                    out_ts_f = self._eval_with_pooling(test_data_f[((n_batches + 1) * self.batch_size):, :, :], 'f',encoding_window='full_series')
+                    out_ts_f = out_ts_f.squeeze(1).to(device=self.device)
+                    proj_rep_f = torch.concat([proj_rep_f, self.ts_f_projection_head(out_ts_f).cpu().detach()], dim=0)
+
+            proj_list.append(proj_rep_f.numpy())
+
+        if 'meds' in modalities_selected:
+            test_data_m = proc_modality_dict_test['meds']
+            temporal_missing_m = np.isnan(test_data_m).all(axis=-1).any(axis=0)
+            if temporal_missing_m[0] or temporal_missing_m[-1]:
+                test_data_m = centerize_vary_length_series(test_data_m)
+            test_data_m = test_data_m[~np.isnan(test_data_m).all(axis=2).all(axis=1)]
+            # converting the medications to a tensor type from numpy type
+            test_data_m = torch.from_numpy(test_data_m).to(torch.float).to(device=self.device)
+
+            state_dict = torch.load(f'{self.fd}/{self.seed}_model_m.pkl', map_location=self.device)
+            self.net_m_alt.load_state_dict(state_dict)
+            state_dict_proj_head = torch.load(f'{self.fd}/{self.seed}_proj_head_meds.pkl', map_location=self.device)
+            self.ts_m_projection_head.load_state_dict(state_dict_proj_head)
+            self.ts_m_projection_head.eval()
+
+            if True:
+                out_ts_m = self._eval_with_pooling(test_data_m[list(timepoint_list.keys())[0],:list(timepoint_list.values())[0]+1, :].unsqueeze(0), 'm', encoding_window='full_series')
+                out_ts_m = out_ts_m.squeeze(1).to(device=self.device)
+                proj_rep_m = self.ts_m_projection_head(out_ts_m).cpu().detach()
+
+                for i in range(1, len(timepoint_list)):
+                    out_ts_m = self._eval_with_pooling(
+                        test_data_m[list(timepoint_list.keys())[i], :list(timepoint_list.values())[i]+1, :].unsqueeze(0),
+                        'm', encoding_window='full_series')
+                    out_ts_m = out_ts_m.squeeze(1).to(device=self.device)
+                    proj_rep_m = torch.concat([proj_rep_m, self.ts_m_projection_head(out_ts_m).cpu().detach()], dim=0)
+
+            else:
+                out_ts_m = self._eval_with_pooling(test_data_m[:self.batch_size,:,:], 'm', encoding_window='full_series')
+                out_ts_m = out_ts_m.squeeze(1).to(device=self.device)
+                proj_rep_m = self.ts_m_projection_head(out_ts_m).cpu().detach()
+
+                # this roundabout is being done because all the data is not fitting on the gpu at once.
+                n_batches, remaining_samples = divmod((test_data_m.shape[0]-self.batch_size), self.batch_size)
+                for i in range(1, n_batches+1):
+                    out_ts_m = self._eval_with_pooling(test_data_m[(i*self.batch_size):((i+1)*self.batch_size), :, :], 'm',encoding_window='full_series')
+                    out_ts_m = out_ts_m.squeeze(1).to(device=self.device)
+                    proj_rep_m = torch.concat([proj_rep_m,self.ts_m_projection_head(out_ts_m).cpu().detach()], dim=0)
+
+                if remaining_samples>0:
+                    out_ts_m = self._eval_with_pooling(test_data_m[((n_batches + 1) * self.batch_size):, :, :], 'm',encoding_window='full_series')
+                    out_ts_m = out_ts_m.squeeze(1).to(device=self.device)
+                    proj_rep_m = torch.concat([proj_rep_m, self.ts_m_projection_head(out_ts_m).cpu().detach()], dim=0)
+
+            proj_list.append(proj_rep_m.numpy())
+
+        if ('preops_o' in modalities_selected) or ('preops_l' in modalities_selected):
+            proc_modality_dict_test['preops_o'] = torch.tensor(proc_modality_dict_test['preops_o'], dtype=torch.float)
+            proc_modality_dict_test['preops_l'] = torch.tensor(proc_modality_dict_test['preops_l'], dtype=torch.float)
+
+            test_pr = proc_modality_dict_test['preops_o']
+            test_pr_l = proc_modality_dict_test['preops_l']
+
+            test_ds = preop_model.ExampleDataset(test_pr)
+            test_loader = DataLoader(test_ds, batch_size=128, shuffle=False)
+            test_repr_pr = self.pr_dataset_embeddings(test_loader, inf=1)
+
+            test_ds = preop_model.ExampleDataset(test_pr_l)
+            test_loader = DataLoader(test_ds, batch_size=128, shuffle=False)
+            test_repr_pr_l = self.pr_l_dataset_embeddings(test_loader, inf=1)
+
+            if True:
+                test_repr_pr = test_repr_pr[list(timepoint_list.keys()),:]
+                test_repr_pr_l = test_repr_pr_l[list(timepoint_list.keys()),:]
+
+            proj_list.append(test_repr_pr)
+            proj_list.append(test_repr_pr_l)
+
+        if 'cbow' in modalities_selected:
+            proc_modality_dict_test['cbow'] = torch.tensor(proc_modality_dict_test['cbow'], dtype=torch.float)
+            test_bw = proc_modality_dict_test['cbow']
+            test_ds = preop_model.ExampleDataset(test_bw)
+            test_loader = DataLoader(test_ds, batch_size=128, shuffle=False)
+            test_repr_bw = self.cbow_dataset_embeddings(test_loader, inf=1)
+            if True:
+                test_repr_bw = test_repr_bw[list(timepoint_list.keys()),:]
+            proj_list.append(test_repr_bw)
+
+        if 'homemeds' in modalities_selected:
+            proc_modality_dict_test['homemeds'] = torch.tensor(proc_modality_dict_test['homemeds'], dtype=torch.float)
+            test_hm = proc_modality_dict_test['homemeds']
+            test_ds = preop_model.ExampleDataset(test_hm)
+            test_loader = DataLoader(test_ds, batch_size=128, shuffle=False)
+            test_repr_hm = self.hm_dataset_embeddings(test_loader, inf=1)
+            if True:
+                test_repr_hm = test_repr_hm[list(timepoint_list.keys()),:]
+            proj_list.append(test_repr_hm)
+
+        if 'pmh' in modalities_selected:
+            proc_modality_dict_test['pmh'] = torch.tensor(proc_modality_dict_test['pmh'], dtype=torch.float)
+            test_pmh = proc_modality_dict_test['pmh']
+            test_ds = preop_model.ExampleDataset(test_pmh)
+            test_loader = DataLoader(test_ds, batch_size=128, shuffle=False)
+            test_repr_pmh = self.pmh_dataset_embeddings(test_loader, inf=1)
+            if True:
+                test_repr_pmh = test_repr_pmh[list(timepoint_list.keys()),:]
+            proj_list.append(test_repr_pmh)
+
+        if 'problist' in modalities_selected:
+            proc_modality_dict_test['problist'] = torch.tensor(proc_modality_dict_test['problist'], dtype=torch.float)
+            test_pblist = proc_modality_dict_test['problist']
+            test_ds = preop_model.ExampleDataset(test_pblist)
+            test_loader = DataLoader(test_ds, batch_size=128, shuffle=False)
+            test_repr_pblist = self.problist_dataset_embeddings(test_loader, inf=1)
+            if True:
+                test_repr_pblist = test_repr_pblist[list(timepoint_list.keys()),:]
+            proj_list.append(test_repr_pblist)
+
+        predictors = torch.zeros(proj_list[0].shape).numpy()
+        for i in range(len(proj_list)): predictors = predictors + proj_list[i]
+        print(predictors.shape)
+
+        if True:
+            labels = test_data_a.cpu().detach().numpy()[:,-1]
+            labels[labels==-1]=0  # this is being done to make it convenient for the xgbt classifier
+            all_data = np.concatenate([predictors,labels.reshape(len(labels),1)], axis=1)
+        else:
+            # fitting a regression model to see the predictive power of the representation for alertsn
+            all_data = np.concatenate([predictors,test_data_a[:,-1].reshape(len(test_data_a),1)], axis=1)
+        shuffle_index = torch.randperm(n=all_data.shape[0]).numpy()
+        all_data1 = all_data[shuffle_index]
+
+        upto_test_idx = int(0.2 * len(all_data1))
+        test_all = all_data1[:upto_test_idx]
+        train_all = all_data1[upto_test_idx:]
+
+
+        import xgboost as xgb
+        from scipy.stats.stats import pearsonr
+        from sklearn.metrics import r2_score, average_precision_score, roc_auc_score
+        from sklearn.model_selection import GridSearchCV
+
+        if True:
+            if True:
+                xgb_model = xgb.XGBClassifier()
+                clf1 =  GridSearchCV(xgb_model,{"max_depth": [4, 6], "n_estimators": [50, 100, 200], "learning_rate": [0.01, 0.1, 1.0]}, cv=3,verbose=1)
+                # clf1 = GridSearchCV(xgb_model,{"max_depth": [4], "n_estimators": [50], "learning_rate": [0.01]}, cv=2,verbose=1)
+                # this random 2 fit cv's result : {'outcome_rate_test': 0.15615141, 'acc': 0.832807570977918, 'auprc': 0.1930787457986194, 'auroc': 0.5944397243462665, 'train_sample_size': 2536, 'test_sample_size': 634}
+                clf1.fit(train_all[:, :-1], train_all[:, -1])
+                pred_y_test = clf1.best_estimator_.predict_proba(test_all[:, :-1])
+                acc = clf1.score(test_all[:, :-1], test_all[:,-1])
+            else:
+                xgb_model = xgb.XGBRegressor(random_state=42)
+                reg1 = GridSearchCV(xgb_model,{"max_depth": [4, 6], "n_estimators": [50, 100, 200], "learning_rate": [0.01, 0.1, 1.0]}, cv=3,verbose=1,)
+                # reg1 = GridSearchCV(xgb_model,{"max_depth": [4], "n_estimators": [50], "learning_rate": [0.01]}, cv=2,verbose=1,)
+                reg1.fit(train_all[:,:-1], train_all[:,-1])
+                pred_y_test = reg1.best_estimator_.predict(test_all[:, :-1])
+        else:
+            if True:
+                clf = xgb.XGBClassifier(n_estimators=346, max_depth=8, learning_rate=0.001, random_state=42)
+                clf.fit(train_all[:, :-1], train_all[:, -1])
+                pred_y_test = clf.predict_proba(test_all[:, :-1])
+                acc = clf.score(test_all[:, :-1], test_all[:,-1])
+            else:
+                reg = xgb.XGBRegressor(n_estimators=346, max_depth=8, learning_rate=0.001, random_state=42)
+                reg.fit(train_all[:, :-1], train_all[:, -1])
+                pred_y_test = reg.predict(test_all[:, :-1])
+
+        if True:
+            auprc = average_precision_score(np.array(test_all[:,-1]), np.array(pred_y_test)[:, 1])
+            auroc = roc_auc_score(np.array(test_all[:,-1]), np.array(pred_y_test)[:, 1])
+            alerts_vs_repr_dict = {'outcome_rate_test':test_all[:,-1].mean(), 'acc': acc, 'auprc': auprc, 'auroc': auroc, 'train_sample_size':len(train_all), 'test_sample_size':len(test_all)}
+        else:
+            # this is for the earlier method which uses all the methods
+            corr_value = np.round(pearsonr(np.array(test_all[:,-1]), np.array(pred_y_test))[0], 3)
+            cor_p_value = np.round(pearsonr(np.array(test_all[:,-1]), np.array(pred_y_test))[1], 3)
+            print(" alerts prediction with correlation ", corr_value, ' and corr p value of ', cor_p_value)
+            r2value = r2_score(np.array(test_all[:,-1]), np.array(pred_y_test))  # inbuilt function also exists for R2
+            print(" Value of R2 ", r2value)
+            alerts_vs_repr_dict = {'corr':corr_value, 'corr_p_value':cor_p_value, 'r2_value':r2value, 'train_sample_size':len(train_all), 'test_sample_size':len(test_all)}
+
+        print(alerts_vs_repr_dict)
+        return alerts_vs_repr_dict

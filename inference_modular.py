@@ -136,6 +136,7 @@ if __name__ == '__main__':
         args.repr_dims_a = args.repr_dims_f
 
     # run_dir = 'training/icu_modal__preops_o_preops_l_cbow_flow_meds_alerts_pmh_problist_homemeds_postopcomp_multipleCL_20240506_134734'
+    # run_dir = 'training/icu_modal__preops_o_preops_l_cbow_flow_meds_alerts_pmh_problist_homemeds_postopcomp_multipleCL_20240507_191149'  This one also has the ts models saved
     run_dir = args.model_dir
     # datadir = '/home/trips/Epic_ContrastiveLearning_all_modalities/Inference_Dir/'
     datadir = args.data_dir
@@ -261,3 +262,6 @@ if __name__ == '__main__':
         train_rep_idx_pblist.to_csv(str(args.output_dir) + 'Problist_repres_from_all_modalities.csv', index=False)
 
 
+    # this would need access to alerts which current datautils_inf file is not capable of
+    # how one can modify the following function which will can take the alerts directly and would need the ts saved models in addition to the preops saved models
+    # association_metrics_dict = model.associationBTWalertsANDrestmodalities(proc_modality_dict_train)
