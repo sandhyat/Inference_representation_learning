@@ -311,13 +311,14 @@ class TSEncoder_m_alt(nn.Module):
         # meds_tensor = torch.zeros(x0.shape[0], x0.shape[1], self.input_dims).to(device=x0.device)
 
         # Create indices for non-zero values
+        # breakpoint()
         nonzero_indices = torch.nonzero(med_dose)
-
         try:
             # Perform the multiplication without modifying the original tensor
-            values_to_add = x0[nonzero_indices[:, 0], nonzero_indices[:, 1], nonzero_indices[:, 2]] * \
-                            med_units_embed.squeeze()[
-                                nonzero_indices[:, 0], nonzero_indices[:, 1], nonzero_indices[:, 2]]
+            if nonzero_indices.ndim !=3:  # this is to accomodate the single example case
+                values_to_add = x0[nonzero_indices[:, 0], nonzero_indices[:, 1], nonzero_indices[:, 2]] * med_units_embed[nonzero_indices[:, 0], nonzero_indices[:, 1], nonzero_indices[:, 2]].squeeze()
+            else:
+                values_to_add = x0[nonzero_indices[:, 0], nonzero_indices[:, 1], nonzero_indices[:, 2]] * med_units_embed.squeeze()[nonzero_indices[:, 0], nonzero_indices[:, 1], nonzero_indices[:, 2]]
         except IndexError:
             print("Needs debugging")
             breakpoint()
@@ -327,8 +328,7 @@ class TSEncoder_m_alt(nn.Module):
         #                 med_units_embed.squeeze()[nonzero_indices[:, 0], nonzero_indices[:, 1], nonzero_indices[:, 2]]
 
         # Use advanced indexing to update the meds_tensor
-        meds_tensor[nonzero_indices[:, 0], nonzero_indices[:, 1],
-                    med_ids[nonzero_indices[:, 0], nonzero_indices[:, 1], nonzero_indices[:, 2]].long()] = values_to_add
+        meds_tensor[nonzero_indices[:, 0], nonzero_indices[:, 1],med_ids[nonzero_indices[:, 0], nonzero_indices[:, 1], nonzero_indices[:, 2]].long()] = values_to_add
 
 
         # breakpoint()

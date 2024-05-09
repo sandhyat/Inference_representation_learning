@@ -1,18 +1,18 @@
 # Inference_representation_learning
 
 The main file to run is inference_modular.py
-The code expects that you have trained model which is saved in the training folder, a data directory and an output directory.
+The code expects that you have trained model and the corresponding json file to instantiate the model which is saved in the training folder, a data directory and an output directory.
 
 For the saved model provided in the training folder, one can use the following command to obtain the representation for all the preops.
 
 ```
-python inference_modular.py Epic_Dataset --preops --cbow --pmh --problist --homemeds --outcome=icu --medid_embed_dim=17 --repr_dims_f=349 --preops_rep_dim_o=78 --preops_rep_dim_l=96 --cbow_rep_dim=112 --homemeds_rep_dim=217 --pmh_rep_dim=89 --prob_list_rep_dim=50 --outcome_rep_dim=64 --proj_dim=111 --proj_head_depth=5 --weight_preops=0.608 --weight_ts_preops=0.7849 --weight_outcomes=0.7679 --weight_std=0.2834 --weight_cov=0.7875 --weight_mse=0.0 --weight_ts_cross=0.2922 --batch-size=24 --epochs=2 --iters=290 --lr=0.0001 --seed=6936 --output_dir='./' --model_dir='training/icu_modal__preops_o_preops_l_cbow_flow_meds_alerts_pmh_problist_homemeds_postopcomp_multipleCL_20240506_134734' --data_dir='/home/trips/Epic_ContrastiveLearning_all_modalities/Inference_Dir/'
+python inference_modular.py Epic_Dataset --preops --cbow --pmh --problist --homemeds --output_dir='./' --model_dir='training/icu_modal__preops_o_preops_l_cbow_flow_meds_alerts_pmh_problist_homemeds_postopcomp_multipleCL_20240509_135453' --data_dir='/home/trips/Epic_ContrastiveLearning_all_modalities/Inference_Dir/'
 ```
 
 If one is interested in only obtaining the representation for selected modality, they can add or remove the following arguments.
 ``` --preops --cbow --pmh --problist --homemeds ``` 
 
-Note that preops argument will give you preops labs too. outcome argument is irrelevant and is just a placeholder.
+Note that preops argument will give you preops labs too.
 
 The input files or the format that are needed/compatible with are as follows:
 1) preops_reduced_for_training.feather

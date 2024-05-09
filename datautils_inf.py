@@ -151,7 +151,7 @@ def preprocess_inference(preops, metadata):
 
     return preops_ohe
 
-def load_epic(dataset, outcome, modality_to_uselist,data_dir):  # dataset is whether it is flowsheets or meds, outcome is the postoperative outcome, list has the name of all modalities that will be used
+def load_epic(dataset, modality_to_uselist,data_dir):  # dataset is whether it is flowsheets or meds, list has the name of all modalities that will be used
 
     # creating modality dictionary
     output_to_return_train = {}
